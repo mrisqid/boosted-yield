@@ -6,7 +6,9 @@ pragma solidity ^0.8.20;
 //////////////////////////////////////////////////////////////*/
 
 import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
-import {ERC721BurnableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
+import {
+    ERC721BurnableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
@@ -102,20 +104,10 @@ contract BoostedYieldLockerUpgradeable is
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Emitted when an ERC20 token is configured
-    event TokenConfigured(
-        uint256 indexed tokenId,
-        address indexed tokenAddr,
-        string tokenName,
-        bool enabled
-    );
+    event TokenConfigured(uint256 indexed tokenId, address indexed tokenAddr, string tokenName, bool enabled);
 
     /// @notice Emitted when a lock period is configured
-    event LockPeriodConfigured(
-        uint256 indexed lockPeriodId,
-        uint256 duration,
-        string label,
-        bool enabled
-    );
+    event LockPeriodConfigured(uint256 indexed lockPeriodId, uint256 duration, string label, bool enabled);
 
     /// @notice Emitted when a user locks tokens and receives an NFT
     event Locked(
@@ -129,12 +121,7 @@ contract BoostedYieldLockerUpgradeable is
     );
 
     /// @notice Emitted when a user redeems tokens and burns the NFT
-    event Redeemed(
-        address indexed user,
-        uint256 indexed nftId,
-        uint256 indexed tokenId,
-        uint256 amount
-    );
+    event Redeemed(address indexed user, uint256 indexed nftId, uint256 indexed tokenId, uint256 amount);
 
     /*//////////////////////////////////////////////////////////////
                             INITIALIZER
@@ -171,19 +158,13 @@ contract BoostedYieldLockerUpgradeable is
     /// @param tokenAddr ERC20 token address
     /// @param tokenName Human-readable name
     /// @param enabled Whether locking is enabled
-    function configureToken(
-        uint256 tokenId,
-        address tokenAddr,
-        string calldata tokenName,
-        bool enabled
-    ) external onlyOwner {
+    function configureToken(uint256 tokenId, address tokenAddr, string calldata tokenName, bool enabled)
+        external
+        onlyOwner
+    {
         require(tokenAddr != address(0), "Invalid token");
 
-        tokenConfigs[tokenId] = TokenConfig({
-            tokenAddr: tokenAddr,
-            tokenName: tokenName,
-            enabled: enabled
-        });
+        tokenConfigs[tokenId] = TokenConfig({tokenAddr: tokenAddr, tokenName: tokenName, enabled: enabled});
 
         emit TokenConfigured(tokenId, tokenAddr, tokenName, enabled);
     }
@@ -193,19 +174,13 @@ contract BoostedYieldLockerUpgradeable is
     /// @param duration Lock duration in seconds
     /// @param label Human-readable label
     /// @param enabled Whether the lock period is active
-    function configureLockPeriod(
-        uint256 lockPeriodId,
-        uint256 duration,
-        string calldata label,
-        bool enabled
-    ) external onlyOwner {
+    function configureLockPeriod(uint256 lockPeriodId, uint256 duration, string calldata label, bool enabled)
+        external
+        onlyOwner
+    {
         require(duration > 0, "Invalid duration");
 
-        lockPeriods[lockPeriodId] = LockPeriodConfig({
-            duration: duration,
-            label: label,
-            enabled: enabled
-        });
+        lockPeriods[lockPeriodId] = LockPeriodConfig({duration: duration, label: label, enabled: enabled});
 
         emit LockPeriodConfigured(lockPeriodId, duration, label, enabled);
     }
@@ -219,11 +194,7 @@ contract BoostedYieldLockerUpgradeable is
     /// @param lockPeriodId Lock period configuration ID
     /// @param amount Amount of tokens to lock
     /// @return nftId Newly minted NFT ID
-    function lock(
-        uint256 tokenId,
-        uint256 lockPeriodId,
-        uint256 amount
-    ) external nonReentrant returns (uint256 nftId) {
+    function lock(uint256 tokenId, uint256 lockPeriodId, uint256 amount) external nonReentrant returns (uint256 nftId) {
         TokenConfig memory token = tokenConfigs[tokenId];
         LockPeriodConfig memory period = lockPeriods[lockPeriodId];
 
@@ -233,11 +204,7 @@ contract BoostedYieldLockerUpgradeable is
 
         uint256 unlockTime = block.timestamp + period.duration;
 
-        IERC20(token.tokenAddr).safeTransferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
+        IERC20(token.tokenAddr).safeTransferFrom(msg.sender, address(this), amount);
 
         nftId = _nextNftId++;
         _safeMint(msg.sender, nftId);
@@ -250,15 +217,7 @@ contract BoostedYieldLockerUpgradeable is
             lockPeriodId: lockPeriodId
         });
 
-        emit Locked(
-            msg.sender,
-            nftId,
-            tokenId,
-            amount,
-            lockPeriodId,
-            block.timestamp,
-            unlockTime
-        );
+        emit Locked(msg.sender, nftId, tokenId, amount, lockPeriodId, block.timestamp, unlockTime);
     }
 
     /// @notice Redeems locked tokens after lock period ends
@@ -287,10 +246,6 @@ contract BoostedYieldLockerUpgradeable is
     function _addLockPeriod(uint256 duration, string memory label) internal {
         uint256 id = ++nextLockPeriodId;
 
-        lockPeriods[id] = LockPeriodConfig({
-            duration: duration,
-            label: label,
-            enabled: true
-        });
+        lockPeriods[id] = LockPeriodConfig({duration: duration, label: label, enabled: true});
     }
 }

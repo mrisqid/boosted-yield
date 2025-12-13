@@ -27,12 +27,7 @@ contract BoostedYieldTest is Test {
         token = new MockERC20();
 
         // configure token
-        locker.configureToken(
-            TOKEN_ID,
-            address(token),
-            "Mock Token",
-            true
-        );
+        locker.configureToken(TOKEN_ID, address(token), "Mock Token", true);
 
         vm.stopPrank();
 
@@ -62,23 +57,14 @@ contract BoostedYieldTest is Test {
 
     function test_lock_createsNFTAndStoresPosition() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(
-            TOKEN_ID,
-            LOCK_PERIOD_3M,
-            STAKE_AMOUNT
-        );
+        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
 
         // NFT ownership
         assertEq(locker.ownerOf(nftId), user);
 
         // position data
-        (
-            uint256 tokenId,
-            uint256 amount,
-            uint256 startTime,
-            uint256 unlockTime,
-            uint256 lockPeriodId
-        ) = locker.positions(nftId);
+        (uint256 tokenId, uint256 amount, uint256 startTime, uint256 unlockTime, uint256 lockPeriodId) =
+            locker.positions(nftId);
 
         assertEq(tokenId, TOKEN_ID);
         assertEq(amount, STAKE_AMOUNT);
@@ -91,12 +77,7 @@ contract BoostedYieldTest is Test {
 
     function test_lock_reverts_ifTokenDisabled() public {
         vm.prank(owner);
-        locker.configureToken(
-            TOKEN_ID,
-            address(token),
-            "Mock Token",
-            false
-        );
+        locker.configureToken(TOKEN_ID, address(token), "Mock Token", false);
 
         vm.prank(user);
         vm.expectRevert("Token disabled");
@@ -115,11 +96,7 @@ contract BoostedYieldTest is Test {
 
     function test_redeem_afterLockPeriod() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(
-            TOKEN_ID,
-            LOCK_PERIOD_3M,
-            STAKE_AMOUNT
-        );
+        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
 
         // fast forward time
         vm.warp(block.timestamp + 90 days + 1);
@@ -134,19 +111,12 @@ contract BoostedYieldTest is Test {
         locker.ownerOf(nftId);
 
         // token returned
-        assertEq(
-            token.balanceOf(user),
-            userBalanceBefore + STAKE_AMOUNT
-        );
+        assertEq(token.balanceOf(user), userBalanceBefore + STAKE_AMOUNT);
     }
 
     function test_redeem_reverts_ifStillLocked() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(
-            TOKEN_ID,
-            LOCK_PERIOD_3M,
-            STAKE_AMOUNT
-        );
+        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
 
         vm.prank(user);
         vm.expectRevert("Still locked");
@@ -155,11 +125,7 @@ contract BoostedYieldTest is Test {
 
     function test_redeem_reverts_ifNotOwner() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(
-            TOKEN_ID,
-            LOCK_PERIOD_3M,
-            STAKE_AMOUNT
-        );
+        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
 
         vm.warp(block.timestamp + 90 days + 1);
 
