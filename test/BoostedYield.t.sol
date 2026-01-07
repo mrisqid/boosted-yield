@@ -1,136 +1,151 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {BoostedYieldLockerUpgradeable} from "../src/BoostedYield.sol";
+import {BoostedYield} from "../src/BoostedYield.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract BoostedYieldTest is Test {
-    BoostedYieldLockerUpgradeable locker;
+    BoostedYield vault;
     MockERC20 token;
 
-    address owner = address(0x1);
-    address user = address(0x2);
+    address admin = address(0x1);
+    address rewarder = address(0x2);
+    address user = address(0x3);
 
     uint256 constant TOKEN_ID = 1;
-    uint256 constant LOCK_PERIOD_3M = 1;
+    uint256 constant DURATION = 30 days;
     uint256 constant STAKE_AMOUNT = 1_000 ether;
+    uint256 constant REWARD_AMOUNT = 500 ether;
+
+    /*//////////////////////////////////////////////////////////////
+                                SETUP
+    //////////////////////////////////////////////////////////////*/
 
     function setUp() public {
-        vm.startPrank(owner);
+        vm.startPrank(admin);
 
-        // deploy contracts
-        locker = new BoostedYieldLockerUpgradeable();
-        locker.initialize(owner);
+        // 1️⃣ Deploy implementation (initializer disabled)
+        BoostedYield impl = new BoostedYield();
 
+        // 2️⃣ Encode initializer call
+        bytes memory initData = abi.encodeCall(
+            BoostedYield.initialize,
+            (admin, rewarder)
+        );
+
+        // 3️⃣ Deploy proxy
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            initData
+        );
+
+        // 4️⃣ Cast proxy as BoostedYield
+        vault = BoostedYield(address(proxy));
+
+        // 5️⃣ Deploy mock token
         token = new MockERC20();
 
-        // configure token
-        locker.configureToken(TOKEN_ID, address(token), "Mock Token", true);
+        // 6️⃣ Configure token + duration
+        vault.addToken(address(token), "MOCK");
+
+        vault.updateDuration(
+            TOKEN_ID,
+            DURATION,
+            true,
+            true
+        );
 
         vm.stopPrank();
 
-        // fund user
+        // Fund accounts
         token.mint(user, 10_000 ether);
+        token.mint(rewarder, 10_000 ether);
 
         vm.prank(user);
-        token.approve(address(locker), type(uint256).max);
+        token.approve(address(vault), type(uint256).max);
+
+        vm.prank(rewarder);
+        token.approve(address(vault), type(uint256).max);
     }
 
     /*//////////////////////////////////////////////////////////////
                             INITIALIZATION
     //////////////////////////////////////////////////////////////*/
 
-    function test_initialize_setsDefaults() public view {
-        assertEq(locker.owner(), owner);
-        assertEq(locker.nextLockPeriodId(), 3);
-
-        (uint256 duration,, bool enabled) = locker.lockPeriods(1);
-        assertEq(duration, 90 days);
-        assertTrue(enabled);
+    function test_initialize_setsRoles() public view {
+        assertTrue(vault.hasRole(vault.DEFAULT_ADMIN_ROLE(), admin));
+        assertTrue(vault.hasRole(vault.REWARDER_ROLE(), rewarder));
     }
 
     /*//////////////////////////////////////////////////////////////
-                              LOCK
+                                MINT
     //////////////////////////////////////////////////////////////*/
 
-    function test_lock_createsNFTAndStoresPosition() public {
+    function test_mint_createsNFTAndStoresPosition() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
 
-        // NFT ownership
-        assertEq(locker.ownerOf(nftId), user);
+        assertEq(vault.ownerOf(nftId), user);
 
-        // position data
-        (uint256 tokenId, uint256 amount, uint256 startTime, uint256 unlockTime, uint256 lockPeriodId) =
-            locker.positions(nftId);
+        BoostedYield.Position memory pos = vault.getPosition(nftId);
 
-        assertEq(tokenId, TOKEN_ID);
-        assertEq(amount, STAKE_AMOUNT);
-        assertEq(lockPeriodId, LOCK_PERIOD_3M);
-        assertEq(unlockTime, startTime + 90 days);
+        assertEq(pos.tokenId, TOKEN_ID);
+        assertEq(pos.principal, STAKE_AMOUNT);
+        assertEq(pos.duration, DURATION);
+        assertGt(pos.startTime, 0);
+        assertGt(pos.maturityTime, pos.startTime);
+        assertEq(pos.tokensOwed, 0);
 
-        // token transferred
-        assertEq(token.balanceOf(address(locker)), STAKE_AMOUNT);
+        assertEq(token.balanceOf(address(vault)), STAKE_AMOUNT);
     }
 
-    function test_lock_reverts_ifTokenDisabled() public {
-        vm.prank(owner);
-        locker.configureToken(TOKEN_ID, address(token), "Mock Token", false);
-
-        vm.prank(user);
-        vm.expectRevert("Token disabled");
-        locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
-    }
-
-    function test_lock_reverts_ifAmountZero() public {
+    function test_mint_reverts_ifAmountZero() public {
         vm.prank(user);
         vm.expectRevert("Invalid amount");
-        locker.lock(TOKEN_ID, LOCK_PERIOD_3M, 0);
+        vault.mint(TOKEN_ID, 0, DURATION);
     }
 
     /*//////////////////////////////////////////////////////////////
-                              REDEEM
+                            REWARDS
     //////////////////////////////////////////////////////////////*/
 
-    function test_redeem_afterLockPeriod() public {
+    function test_depositRewards_and_collect() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
 
-        // fast forward time
-        vm.warp(block.timestamp + 90 days + 1);
-
-        uint256 userBalanceBefore = token.balanceOf(user);
+        vm.prank(rewarder);
+        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
 
         vm.prank(user);
-        locker.redeem(nftId);
+        uint256 collected = vault.collect(nftId);
 
-        // NFT burned
-        vm.expectRevert();
-        locker.ownerOf(nftId);
-
-        // token returned
-        assertEq(token.balanceOf(user), userBalanceBefore + STAKE_AMOUNT);
+        assertEq(collected, REWARD_AMOUNT);
     }
 
-    function test_redeem_reverts_ifStillLocked() public {
+    /*//////////////////////////////////////////////////////////////
+                                WITHDRAW
+    //////////////////////////////////////////////////////////////*/
+
+    function test_withdraw_afterMaturity() public {
         vm.prank(user);
-        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+
+        vm.prank(rewarder);
+        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+
+        vm.warp(block.timestamp + DURATION + 1);
+
+        uint256 balanceBefore = token.balanceOf(user);
 
         vm.prank(user);
-        vm.expectRevert("Still locked");
-        locker.redeem(nftId);
-    }
+        vault.withdraw(nftId);
 
-    function test_redeem_reverts_ifNotOwner() public {
-        vm.prank(user);
-        uint256 nftId = locker.lock(TOKEN_ID, LOCK_PERIOD_3M, STAKE_AMOUNT);
-
-        vm.warp(block.timestamp + 90 days + 1);
-
-        vm.prank(address(0x3));
-        vm.expectRevert("Not NFT owner");
-        locker.redeem(nftId);
+        assertEq(
+            token.balanceOf(user),
+            balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT
+        );
     }
 }

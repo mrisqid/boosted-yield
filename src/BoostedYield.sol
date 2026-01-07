@@ -5,11 +5,8 @@ pragma solidity ^0.8.20;
                         OPENZEPPELIN IMPORTS
 //////////////////////////////////////////////////////////////*/
 
-import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
-import {
-    ERC721BurnableUpgradeable
-} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721BurnableUpgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ERC721EnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -20,232 +17,347 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
                         CONTRACT OVERVIEW
 //////////////////////////////////////////////////////////////*/
 
-/// @title BoostedYieldLockerUpgradeable
-/// @author Your Name / Team
+/// @title BoostedYield
+/// @author Your Team
 /// @notice
-/// An upgradeable ERC721-based yield locking contract.
-/// Users lock ERC20 tokens for a predefined lock period and
-/// receive an NFT representing their locked position.
-/// The NFT is required to redeem the locked tokens after maturity.
+/// Multi-token NFT-based staking contract with duration-based yield distribution.
+/// Each NFT represents a staking position for a specific ERC20 token and duration.
 ///
 /// @dev
-/// - Uses UUPS upgrade pattern
-/// - Uses ERC721 NFTs as position receipts
-/// - Uses SafeERC20 for token safety
-/// - Lock periods are configurable and dynamic
-contract BoostedYieldLockerUpgradeable is
-    ERC721Upgradeable,
-    ERC721BurnableUpgradeable,
-    OwnableUpgradeable,
+/// - Multiple staking tokens supported
+/// - Falcon-style feeGrowthX128 accounting
+/// - Single ERC721 for all positions
+/// - Upgradeable via UUPS
+contract BoostedYield is
+    ERC721EnumerableUpgradeable,
+    AccessControlUpgradeable,
     ReentrancyGuard,
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////
+                                ROLES
+    //////////////////////////////////////////////////////////////*/
+
+    bytes32 public constant REWARDER_ROLE = keccak256("REWARDER_ROLE");
+
+    /*//////////////////////////////////////////////////////////////
                                 STRUCTS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Configuration for supported ERC20 tokens
-    /// @param tokenAddr ERC20 token contract address
-    /// @param tokenName Human-readable token name (UI purpose)
-    /// @param enabled Whether the token can be locked
+    /// @notice ERC20 staking token configuration
     struct TokenConfig {
-        address tokenAddr;
-        string tokenName;
+        IERC20 token;
+        string symbol;
         bool enabled;
     }
 
-    /// @notice Configuration for lock periods
-    /// @param duration Lock duration in seconds
-    /// @param label Human-readable label (e.g. "3 Months")
-    /// @param enabled Whether this lock period is usable
-    struct LockPeriodConfig {
-        uint256 duration;
-        string label;
-        bool enabled;
+    /// @notice Duration-tier accounting (per token)
+    struct DurationInfo {
+        bool isSupported;
+        bool mintEnabled;
+        uint256 totalLiquidity;
+        uint256 feeGrowthX128;
     }
 
-    /// @notice Represents a user lock position tied to an NFT
-    /// @param tokenId ID of the token configuration used
-    /// @param amount Amount of ERC20 tokens locked
-    /// @param startTime Timestamp when lock started
-    /// @param unlockTime Timestamp when tokens can be redeemed
-    /// @param lockPeriodId ID of the lock period configuration
-    struct LockPosition {
+    /// @notice NFT staking position
+    struct Position {
         uint256 tokenId;
-        uint256 amount;
-        uint256 startTime;
-        uint256 unlockTime;
-        uint256 lockPeriodId;
+        uint256 principal;
+        uint40 duration;
+        uint40 startTime;
+        uint40 maturityTime;
+        uint256 feeGrowthInsideLastX128;
+        uint256 tokensOwed;
+    }
+
+    /// @notice Bucket for matured positions
+    struct MaturityBucket {
+        uint256 totalLiquidity;
+        uint256 feeGrowthX128AtMaturity;
     }
 
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Incremental ID for lock period configurations
-    uint256 public nextLockPeriodId;
+    /// @notice ERC721 token counter
+    uint256 internal _nextNftId;
 
-    /// @dev Internal counter for NFT IDs (starts at 1)
-    uint256 private _nextNftId;
-
-    /// @notice tokenConfigId => TokenConfig
+    /// @notice Staking token registry
+    uint256 public nextTokenId;
     mapping(uint256 => TokenConfig) public tokenConfigs;
 
-    /// @notice lockPeriodId => LockPeriodConfig
-    mapping(uint256 => LockPeriodConfig) public lockPeriods;
+    /// @notice tokenId => duration => DurationInfo
+    mapping(uint256 => mapping(uint256 => DurationInfo)) internal durationInfo;
 
-    /// @notice nftId => LockPosition
-    mapping(uint256 => LockPosition) public positions;
+    /// @notice tokenId => duration => maturityTime => bucket
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => MaturityBucket)))
+        public maturityBuckets;
+
+    /// @notice tokenId => duration => last matured timestamp
+    mapping(uint256 => mapping(uint256 => uint256)) public lastMaturedDate;
+
+    /// @notice nftId => Position
+    mapping(uint256 => Position) internal positions;
 
     /*//////////////////////////////////////////////////////////////
                                 EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Emitted when an ERC20 token is configured
-    event TokenConfigured(uint256 indexed tokenId, address indexed tokenAddr, string tokenName, bool enabled);
-
-    /// @notice Emitted when a lock period is configured
-    event LockPeriodConfigured(uint256 indexed lockPeriodId, uint256 duration, string label, bool enabled);
-
-    /// @notice Emitted when a user locks tokens and receives an NFT
-    event Locked(
-        address indexed user,
-        uint256 indexed nftId,
+    event TokenAdded(uint256 indexed tokenId, address token, string symbol);
+    event DurationUpdated(
         uint256 indexed tokenId,
-        uint256 amount,
-        uint256 lockPeriodId,
-        uint256 startTime,
-        uint256 unlockTime
+        uint256 duration,
+        bool supported,
+        bool mintEnabled
     );
 
-    /// @notice Emitted when a user redeems tokens and burns the NFT
-    event Redeemed(address indexed user, uint256 indexed nftId, uint256 indexed tokenId, uint256 amount);
+    event PositionMinted(
+        uint256 indexed nftId,
+        address indexed user,
+        uint256 indexed tokenId,
+        uint256 amount,
+        uint256 duration
+    );
+
+    event RewardsDeposited(
+        uint256 indexed tokenId,
+        uint256 duration,
+        uint256 amount
+    );
+    event FeesCollected(uint256 indexed nftId, uint256 amount);
+    event PositionClosed(
+        uint256 indexed nftId,
+        address indexed user,
+        uint256 principal,
+        uint256 fees
+    );
 
     /*//////////////////////////////////////////////////////////////
                             INITIALIZER
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Initializes the contract (called once via proxy)
-    /// @param owner_ Address to be set as the contract owner
-    function initialize(address owner_) external initializer {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(address admin, address rewarder) external initializer {
         __ERC721_init("Boosted Yield Position", "BYP");
-        __ERC721Burnable_init();
-        __Ownable_init(owner_);
+        __ERC721Enumerable_init();
+        __AccessControl_init();
+
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(REWARDER_ROLE, rewarder);
 
         _nextNftId = 1;
-
-        // Default lock periods
-        _addLockPeriod(90 days, "3 Months");
-        _addLockPeriod(180 days, "6 Months");
-        _addLockPeriod(365 days, "12 Months");
     }
 
     /*//////////////////////////////////////////////////////////////
                         UUPS AUTHORIZATION
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Restricts upgrades to the contract owner
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    function _authorizeUpgrade(
+        address
+    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /*//////////////////////////////////////////////////////////////
                         ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Adds or updates an ERC20 token configuration
-    /// @param tokenId Arbitrary token configuration ID
-    /// @param tokenAddr ERC20 token address
-    /// @param tokenName Human-readable name
-    /// @param enabled Whether locking is enabled
-    function configureToken(uint256 tokenId, address tokenAddr, string calldata tokenName, bool enabled)
-        external
-        onlyOwner
-    {
-        require(tokenAddr != address(0), "Invalid token");
+    function addToken(
+        address token,
+        string calldata symbol
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(token != address(0), "Invalid token");
 
-        tokenConfigs[tokenId] = TokenConfig({tokenAddr: tokenAddr, tokenName: tokenName, enabled: enabled});
+        nextTokenId++;
+        tokenConfigs[nextTokenId] = TokenConfig({
+            token: IERC20(token),
+            symbol: symbol,
+            enabled: true
+        });
 
-        emit TokenConfigured(tokenId, tokenAddr, tokenName, enabled);
+        emit TokenAdded(nextTokenId, token, symbol);
     }
 
-    /// @notice Adds or updates a lock period configuration
-    /// @param lockPeriodId Lock period ID
-    /// @param duration Lock duration in seconds
-    /// @param label Human-readable label
-    /// @param enabled Whether the lock period is active
-    function configureLockPeriod(uint256 lockPeriodId, uint256 duration, string calldata label, bool enabled)
-        external
-        onlyOwner
-    {
+    function updateDuration(
+        uint256 tokenId,
+        uint256 duration,
+        bool supported,
+        bool mintEnabled
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(duration > 0, "Invalid duration");
 
-        lockPeriods[lockPeriodId] = LockPeriodConfig({duration: duration, label: label, enabled: enabled});
+        DurationInfo storage d = durationInfo[tokenId][duration];
 
-        emit LockPeriodConfigured(lockPeriodId, duration, label, enabled);
+        if (!d.isSupported && supported) {
+            durationInfo[tokenId][duration] = DurationInfo({
+                isSupported: true,
+                mintEnabled: mintEnabled,
+                totalLiquidity: 0,
+                feeGrowthX128: 0
+            });
+        } else {
+            d.isSupported = supported;
+            d.mintEnabled = mintEnabled;
+        }
+
+        emit DurationUpdated(tokenId, duration, supported, mintEnabled);
     }
 
     /*//////////////////////////////////////////////////////////////
                         USER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Locks ERC20 tokens and mints an NFT position
-    /// @param tokenId Token configuration ID
-    /// @param lockPeriodId Lock period configuration ID
-    /// @param amount Amount of tokens to lock
-    /// @return nftId Newly minted NFT ID
-    function lock(uint256 tokenId, uint256 lockPeriodId, uint256 amount) external nonReentrant returns (uint256 nftId) {
-        TokenConfig memory token = tokenConfigs[tokenId];
-        LockPeriodConfig memory period = lockPeriods[lockPeriodId];
-
-        require(token.enabled, "Token disabled");
-        require(period.enabled, "Lock period disabled");
+    function mint(
+        uint256 tokenId,
+        uint256 amount,
+        uint256 duration
+    ) external nonReentrant returns (uint256 nftId) {
+        TokenConfig storage tokenCfg = tokenConfigs[tokenId];
+        require(tokenCfg.enabled, "Token disabled");
         require(amount > 0, "Invalid amount");
 
-        uint256 unlockTime = block.timestamp + period.duration;
+        DurationInfo storage d = durationInfo[tokenId][duration];
+        require(d.isSupported && d.mintEnabled, "Invalid duration");
 
-        IERC20(token.tokenAddr).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 maturity = block.timestamp + duration;
 
-        nftId = _nextNftId++;
-        _safeMint(msg.sender, nftId);
+        // floor to day precision
+        maturity = maturity - (maturity % 1 days);
+        require(maturity <= type(uint40).max, "Maturity overflow");
 
-        positions[nftId] = LockPosition({
+        _nextNftId++;
+        nftId = _nextNftId;
+
+        d.totalLiquidity += amount;
+        maturityBuckets[tokenId][duration][maturity].totalLiquidity += amount;
+
+        positions[nftId] = Position({
             tokenId: tokenId,
-            amount: amount,
-            startTime: block.timestamp,
-            unlockTime: unlockTime,
-            lockPeriodId: lockPeriodId
+            principal: amount,
+            // casting to uint40 is safe because duration is bounded above
+            // forge-lint: disable-next-line(unsafe-typecast)
+            duration: uint40(duration),
+            startTime: uint40(block.timestamp),
+            // casting to uint40 is safe because maturity <= type(uint40).max
+            // forge-lint: disable-next-line(unsafe-typecast)
+            maturityTime: uint40(maturity),
+            feeGrowthInsideLastX128: d.feeGrowthX128,
+            tokensOwed: 0
         });
 
-        emit Locked(msg.sender, nftId, tokenId, amount, lockPeriodId, block.timestamp, unlockTime);
+        tokenCfg.token.safeTransferFrom(msg.sender, address(this), amount);
+        _safeMint(msg.sender, nftId);
+
+        emit PositionMinted(nftId, msg.sender, tokenId, amount, duration);
     }
 
-    /// @notice Redeems locked tokens after lock period ends
-    /// @param nftId NFT representing the lock position
-    function redeem(uint256 nftId) external nonReentrant {
-        require(ownerOf(nftId) == msg.sender, "Not NFT owner");
+    function collect(uint256 nftId) external nonReentrant returns (uint256) {
+        require(ownerOf(nftId) == msg.sender, "Not owner");
 
-        LockPosition memory pos = positions[nftId];
-        require(block.timestamp >= pos.unlockTime, "Still locked");
+        Position storage p = positions[nftId];
+        _updatePosition(nftId);
 
-        TokenConfig memory config = tokenConfigs[pos.tokenId];
+        uint256 owed = p.tokensOwed;
+        if (owed > 0) {
+            p.tokensOwed = 0;
+            tokenConfigs[p.tokenId].token.safeTransfer(msg.sender, owed);
+            emit FeesCollected(nftId, owed);
+        }
+
+        return owed;
+    }
+
+    function withdraw(uint256 nftId) external nonReentrant {
+        require(ownerOf(nftId) == msg.sender, "Not owner");
+
+        Position storage p = positions[nftId];
+        require(block.timestamp >= p.startTime + p.duration, "Not matured");
+
+        _updatePosition(nftId);
+
+        uint256 principal = p.principal;
+        uint256 fees = p.tokensOwed;
+        uint256 tokenId = p.tokenId;
 
         delete positions[nftId];
         _burn(nftId);
 
-        IERC20(config.tokenAddr).safeTransfer(msg.sender, pos.amount);
+        IERC20 token = tokenConfigs[tokenId].token;
 
-        emit Redeemed(msg.sender, nftId, pos.tokenId, pos.amount);
+        token.safeTransfer(msg.sender, principal);
+
+        if (fees > 0) {
+            token.safeTransfer(msg.sender, fees);
+            emit FeesCollected(nftId, fees);
+        }
+
+        emit PositionClosed(nftId, msg.sender, principal, fees);
     }
 
     /*//////////////////////////////////////////////////////////////
-                        INTERNAL HELPERS
+                        REWARDER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Adds a new lock period and auto-increments ID
-    function _addLockPeriod(uint256 duration, string memory label) internal {
-        uint256 id = ++nextLockPeriodId;
+    function depositRewards(
+        uint256 tokenId,
+        uint256 duration,
+        uint256 amount
+    ) external nonReentrant onlyRole(REWARDER_ROLE) {
+        require(amount > 0, "Invalid amount");
 
-        lockPeriods[id] = LockPeriodConfig({duration: duration, label: label, enabled: true});
+        DurationInfo storage d = durationInfo[tokenId][duration];
+        require(d.totalLiquidity > 0, "No liquidity");
+
+        uint256 delta = (amount << 128) / d.totalLiquidity;
+        d.feeGrowthX128 += delta;
+
+        tokenConfigs[tokenId].token.safeTransferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
+
+        emit RewardsDeposited(tokenId, duration, amount);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        INTERNAL LOGIC
+    //////////////////////////////////////////////////////////////*/
+
+    function _updatePosition(uint256 nftId) internal {
+        Position storage p = positions[nftId];
+
+        uint256 currentFeeGrowth = durationInfo[p.tokenId][p.duration]
+            .feeGrowthX128;
+
+        uint256 delta = currentFeeGrowth - p.feeGrowthInsideLastX128;
+
+        if (delta > 0) {
+            uint256 accrued = (p.principal * delta) >> 128;
+            p.tokensOwed += accrued;
+            p.feeGrowthInsideLastX128 = currentFeeGrowth;
+        }
+    }
+
+    function getPosition(
+        uint256 nftId
+    ) external view returns (Position memory) {
+        return positions[nftId];
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    )
+        public
+        view
+        override(ERC721EnumerableUpgradeable, AccessControlUpgradeable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
     }
 }
