@@ -5,7 +5,9 @@ pragma solidity ^0.8.20;
                         OPENZEPPELIN IMPORTS
 //////////////////////////////////////////////////////////////*/
 
-import {ERC721EnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
+import {
+    ERC721EnumerableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
@@ -28,12 +30,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// - Falcon-style feeGrowthX128 accounting
 /// - Single ERC721 for all positions
 /// - Upgradeable via UUPS
-contract BoostedYield is
-    ERC721EnumerableUpgradeable,
-    AccessControlUpgradeable,
-    ReentrancyGuard,
-    UUPSUpgradeable
-{
+contract BoostedYield is ERC721EnumerableUpgradeable, AccessControlUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     /*//////////////////////////////////////////////////////////////
@@ -93,8 +90,7 @@ contract BoostedYield is
     mapping(uint256 => mapping(uint256 => DurationInfo)) internal durationInfo;
 
     /// @notice tokenId => duration => maturityTime => bucket
-    mapping(uint256 => mapping(uint256 => mapping(uint256 => MaturityBucket)))
-        public maturityBuckets;
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => MaturityBucket))) public maturityBuckets;
 
     /// @notice tokenId => duration => last matured timestamp
     mapping(uint256 => mapping(uint256 => uint256)) public lastMaturedDate;
@@ -107,33 +103,15 @@ contract BoostedYield is
     //////////////////////////////////////////////////////////////*/
 
     event TokenAdded(uint256 indexed tokenId, address token, string symbol);
-    event DurationUpdated(
-        uint256 indexed tokenId,
-        uint256 duration,
-        bool supported,
-        bool mintEnabled
-    );
+    event DurationUpdated(uint256 indexed tokenId, uint256 duration, bool supported, bool mintEnabled);
 
     event PositionMinted(
-        uint256 indexed nftId,
-        address indexed user,
-        uint256 indexed tokenId,
-        uint256 amount,
-        uint256 duration
+        uint256 indexed nftId, address indexed user, uint256 indexed tokenId, uint256 amount, uint256 duration
     );
 
-    event RewardsDeposited(
-        uint256 indexed tokenId,
-        uint256 duration,
-        uint256 amount
-    );
+    event RewardsDeposited(uint256 indexed tokenId, uint256 duration, uint256 amount);
     event FeesCollected(uint256 indexed nftId, uint256 amount);
-    event PositionClosed(
-        uint256 indexed nftId,
-        address indexed user,
-        uint256 principal,
-        uint256 fees
-    );
+    event PositionClosed(uint256 indexed nftId, address indexed user, uint256 principal, uint256 fees);
 
     /*//////////////////////////////////////////////////////////////
                             INITIALIZER
@@ -159,47 +137,32 @@ contract BoostedYield is
                         UUPS AUTHORIZATION
     //////////////////////////////////////////////////////////////*/
 
-    function _authorizeUpgrade(
-        address
-    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /*//////////////////////////////////////////////////////////////
                         ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function addToken(
-        address token,
-        string calldata symbol
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function addToken(address token, string calldata symbol) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(token != address(0), "Invalid token");
 
         nextTokenId++;
-        tokenConfigs[nextTokenId] = TokenConfig({
-            token: IERC20(token),
-            symbol: symbol,
-            enabled: true
-        });
+        tokenConfigs[nextTokenId] = TokenConfig({token: IERC20(token), symbol: symbol, enabled: true});
 
         emit TokenAdded(nextTokenId, token, symbol);
     }
 
-    function updateDuration(
-        uint256 tokenId,
-        uint256 duration,
-        bool supported,
-        bool mintEnabled
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateDuration(uint256 tokenId, uint256 duration, bool supported, bool mintEnabled)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         require(duration > 0, "Invalid duration");
 
         DurationInfo storage d = durationInfo[tokenId][duration];
 
         if (!d.isSupported && supported) {
-            durationInfo[tokenId][duration] = DurationInfo({
-                isSupported: true,
-                mintEnabled: mintEnabled,
-                totalLiquidity: 0,
-                feeGrowthX128: 0
-            });
+            durationInfo[tokenId][duration] =
+                DurationInfo({isSupported: true, mintEnabled: mintEnabled, totalLiquidity: 0, feeGrowthX128: 0});
         } else {
             d.isSupported = supported;
             d.mintEnabled = mintEnabled;
@@ -212,11 +175,7 @@ contract BoostedYield is
                         USER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function mint(
-        uint256 tokenId,
-        uint256 amount,
-        uint256 duration
-    ) external nonReentrant returns (uint256 nftId) {
+    function mint(uint256 tokenId, uint256 amount, uint256 duration) external nonReentrant returns (uint256 nftId) {
         TokenConfig storage tokenCfg = tokenConfigs[tokenId];
         require(tokenCfg.enabled, "Token disabled");
         require(amount > 0, "Invalid amount");
@@ -303,11 +262,11 @@ contract BoostedYield is
                         REWARDER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function depositRewards(
-        uint256 tokenId,
-        uint256 duration,
-        uint256 amount
-    ) external nonReentrant onlyRole(REWARDER_ROLE) {
+    function depositRewards(uint256 tokenId, uint256 duration, uint256 amount)
+        external
+        nonReentrant
+        onlyRole(REWARDER_ROLE)
+    {
         require(amount > 0, "Invalid amount");
 
         DurationInfo storage d = durationInfo[tokenId][duration];
@@ -316,11 +275,7 @@ contract BoostedYield is
         uint256 delta = (amount << 128) / d.totalLiquidity;
         d.feeGrowthX128 += delta;
 
-        tokenConfigs[tokenId].token.safeTransferFrom(
-            msg.sender,
-            address(this),
-            amount
-        );
+        tokenConfigs[tokenId].token.safeTransferFrom(msg.sender, address(this), amount);
 
         emit RewardsDeposited(tokenId, duration, amount);
     }
@@ -332,8 +287,7 @@ contract BoostedYield is
     function _updatePosition(uint256 nftId) internal {
         Position storage p = positions[nftId];
 
-        uint256 currentFeeGrowth = durationInfo[p.tokenId][p.duration]
-            .feeGrowthX128;
+        uint256 currentFeeGrowth = durationInfo[p.tokenId][p.duration].feeGrowthX128;
 
         uint256 delta = currentFeeGrowth - p.feeGrowthInsideLastX128;
 
@@ -344,15 +298,11 @@ contract BoostedYield is
         }
     }
 
-    function getPosition(
-        uint256 nftId
-    ) external view returns (Position memory) {
+    function getPosition(uint256 nftId) external view returns (Position memory) {
         return positions[nftId];
     }
 
-    function supportsInterface(
-        bytes4 interfaceId
-    )
+    function supportsInterface(bytes4 interfaceId)
         public
         view
         override(ERC721EnumerableUpgradeable, AccessControlUpgradeable)

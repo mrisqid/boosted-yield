@@ -31,16 +31,10 @@ contract BoostedYieldTest is Test {
         BoostedYield impl = new BoostedYield();
 
         // 2️⃣ Encode initializer call
-        bytes memory initData = abi.encodeCall(
-            BoostedYield.initialize,
-            (admin, rewarder)
-        );
+        bytes memory initData = abi.encodeCall(BoostedYield.initialize, (admin, rewarder));
 
         // 3️⃣ Deploy proxy
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            initData
-        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
 
         // 4️⃣ Cast proxy as BoostedYield
         vault = BoostedYield(address(proxy));
@@ -51,12 +45,7 @@ contract BoostedYieldTest is Test {
         // 6️⃣ Configure token + duration
         vault.addToken(address(token), "MOCK");
 
-        vault.updateDuration(
-            TOKEN_ID,
-            DURATION,
-            true,
-            true
-        );
+        vault.updateDuration(TOKEN_ID, DURATION, true, true);
 
         vm.stopPrank();
 
@@ -143,9 +132,6 @@ contract BoostedYieldTest is Test {
         vm.prank(user);
         vault.withdraw(nftId);
 
-        assertEq(
-            token.balanceOf(user),
-            balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT
-        );
+        assertEq(token.balanceOf(user), balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT);
     }
 }
