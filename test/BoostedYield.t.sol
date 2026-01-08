@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {BoostedYield} from "../src/BoostedYield.sol";
+import {IBoostedYield} from "../src/interfaces/IBoostedYield.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 contract BoostedYieldTest is Test {
@@ -89,13 +90,13 @@ contract BoostedYieldTest is Test {
 
     function test_mint_reverts_ifAmountZero() public {
         vm.prank(user);
-        vm.expectRevert(BoostedYield.InvalidAmount.selector);
+        vm.expectRevert(IBoostedYield.InvalidAmount.selector);
         vault.mint(TOKEN_ID, 0, DURATION);
     }
 
     function test_mint_reverts_ifDurationNotSupported() public {
         vm.prank(user);
-        vm.expectRevert(BoostedYield.InvalidDuration.selector);
+        vm.expectRevert(IBoostedYield.InvalidDuration.selector);
         vault.mint(TOKEN_ID, STAKE_AMOUNT, 15 days);
     }
 
@@ -131,7 +132,7 @@ contract BoostedYieldTest is Test {
         vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
 
         vm.prank(user);
-        vm.expectRevert(BoostedYield.OperationNotAllowed.selector);
+        vm.expectRevert(IBoostedYield.OperationNotAllowed.selector);
         vault.collect(nftId);
     }
 
@@ -189,7 +190,7 @@ contract BoostedYieldTest is Test {
         uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
 
         vm.prank(user);
-        vm.expectRevert(BoostedYield.ImmaturePosition.selector);
+        vm.expectRevert(IBoostedYield.ImmaturePosition.selector);
         vault.withdraw(nftId);
     }
 }

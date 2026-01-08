@@ -13,6 +13,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import {IBoostedYield} from "./interfaces/IBoostedYield.sol";
+
 /*//////////////////////////////////////////////////////////////
                         CONTRACT OVERVIEW
 //////////////////////////////////////////////////////////////*/
@@ -29,6 +31,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 /// - Single ERC721 for all positions
 /// - Upgradeable via UUPS
 contract BoostedYield is
+    IBoostedYield,
     ERC721EnumerableUpgradeable,
     AccessControlUpgradeable,
     ReentrancyGuard,
@@ -47,42 +50,6 @@ contract BoostedYield is
     //////////////////////////////////////////////////////////////*/
 
     bool public yieldCollectionEnabled;
-
-    /*//////////////////////////////////////////////////////////////
-                                STRUCTS
-    //////////////////////////////////////////////////////////////*/
-
-    /// @notice ERC20 staking token configuration
-    struct TokenConfig {
-        IERC20 token;
-        string symbol;
-        bool enabled;
-    }
-
-    /// @notice Duration-tier accounting (per token)
-    struct DurationInfo {
-        bool isSupported;
-        bool mintEnabled;
-        uint256 totalLiquidity;
-        uint256 feeGrowthX128;
-    }
-
-    /// @notice NFT staking position
-    struct Position {
-        uint256 tokenId;
-        uint256 principal;
-        uint40 duration;
-        uint40 startTime;
-        uint40 maturityTime;
-        uint256 feeGrowthInsideLastX128;
-        uint256 tokensOwed;
-    }
-
-    /// @notice Bucket for matured positions
-    struct MaturityBucket {
-        uint256 totalLiquidity;
-        uint256 feeGrowthX128AtMaturity;
-    }
 
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
@@ -107,56 +74,6 @@ contract BoostedYield is
 
     /// @notice nftId => Position
     mapping(uint256 => Position) internal positions;
-
-    /*//////////////////////////////////////////////////////////////
-                                ERRORS
-    //////////////////////////////////////////////////////////////*/
-    error OperationNotAllowed();
-    error InvalidAddress();
-    error InvalidAmount();
-    error InvalidDuration();
-    error InvalidToken();
-    error ImmaturePosition();
-
-    /*//////////////////////////////////////////////////////////////
-                                EVENTS
-    //////////////////////////////////////////////////////////////*/
-
-    event YieldCollectionChanged(bool oldEnabled, bool newEnabled);
-    event MaturityProcessed(
-        uint256 duration,
-        uint256 timestamp,
-        uint256 totalLiquidity,
-        uint256 feeGrowthX128
-    );
-    event TokenAdded(uint256 indexed tokenId, address token, string symbol);
-    event DurationUpdated(
-        uint256 indexed tokenId,
-        uint256 duration,
-        bool supported,
-        bool mintEnabled
-    );
-
-    event PositionMinted(
-        uint256 indexed nftId,
-        address indexed user,
-        uint256 indexed tokenId,
-        uint256 principal,
-        uint256 duration
-    );
-
-    event RewardsDeposited(
-        uint256 indexed tokenId,
-        uint256 duration,
-        uint256 amount
-    );
-    event FeesCollected(uint256 indexed nftId, uint256 amount);
-    event PositionClosed(
-        uint256 indexed nftId,
-        address indexed user,
-        uint256 principal,
-        uint256 fees
-    );
 
     /*//////////////////////////////////////////////////////////////
                             MODIFIERS
@@ -410,6 +327,66 @@ contract BoostedYield is
         emit FeesCollected(p.tokenId, tokensOwed);
     }
 
+    function getPosition(
+        uint256 nftId
+    ) external view returns (Position memory) {
+        Position storage position = positions[nftId];
+        return position;
+    }
+
+    function isDurationSupported(
+        uint256 tokenId,
+        uint256 duration
+    ) external view returns (bool) {
+        return durationInfo[tokenId][duration].isSupported;
+    }
+
+    function isMintEnabled(
+        uint256 tokenId,
+        uint256 duration
+    ) external view returns (bool) {
+        return durationInfo[tokenId][duration].mintEnabled;
+    }
+
+    function getDurationInfo(
+        uint256 tokenId,
+        uint256 duration
+    ) external view returns (DurationInfo memory) {
+        return durationInfo[tokenId][duration];
+    }
+
+    function getMaturityBucket(
+        uint256 tokenId,
+        uint256 duration,
+        uint256 timestamp
+    ) external view returns (MaturityBucket memory) {
+        return maturityBuckets[tokenId][duration][timestamp];
+    }
+
+    function getTokenConfig(
+        uint256 tokenId
+    ) external view returns (TokenConfig memory) {
+        return tokenConfigs[tokenId];
+    }
+
+    function getLastMaturedDate(
+        uint256 tokenId,
+        uint256 duration
+    ) external view returns (uint256) {
+        return lastMaturedDate[tokenId][duration];
+    }
+
+    function supportsInterface(
+        bytes4 interfaceId
+    )
+        public
+        view
+        override(ERC721EnumerableUpgradeable, AccessControlUpgradeable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
     /*//////////////////////////////////////////////////////////////
                         REWARDER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
@@ -459,45 +436,6 @@ contract BoostedYield is
             p.tokensOwed += feesAccrued;
             p.feeGrowthInsideLastX128 = currentFeeGrowth;
         }
-    }
-
-    function getPosition(
-        uint256 nftId
-    ) external view returns (Position memory) {
-        Position storage position = positions[nftId];
-        return position;
-    }
-
-    function isDurationSupported(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (bool) {
-        return durationInfo[tokenId][duration].isSupported;
-    }
-
-    function isMintEnabled(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (bool) {
-        return durationInfo[tokenId][duration].mintEnabled;
-    }
-
-    function getDurationInfo(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (DurationInfo memory) {
-        return durationInfo[tokenId][duration];
-    }
-
-    function supportsInterface(
-        bytes4 interfaceId
-    )
-        public
-        view
-        override(ERC721EnumerableUpgradeable, AccessControlUpgradeable)
-        returns (bool)
-    {
-        return super.supportsInterface(interfaceId);
     }
 
     function _cleanupMaturedBuckets(
