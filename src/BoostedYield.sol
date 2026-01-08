@@ -5,7 +5,9 @@ pragma solidity ^0.8.20;
                         OPENZEPPELIN IMPORTS
 //////////////////////////////////////////////////////////////*/
 
-import {ERC721EnumerableUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
+import {
+    ERC721EnumerableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
@@ -66,8 +68,7 @@ contract BoostedYield is
     mapping(uint256 => mapping(uint256 => DurationInfo)) internal durationInfo;
 
     /// @notice tokenId => duration => maturityTime => bucket
-    mapping(uint256 => mapping(uint256 => mapping(uint256 => MaturityBucket)))
-        public maturityBuckets;
+    mapping(uint256 => mapping(uint256 => mapping(uint256 => MaturityBucket))) public maturityBuckets;
 
     /// @notice tokenId => duration => last matured timestamp
     mapping(uint256 => mapping(uint256 => uint256)) public lastMaturedDate;
@@ -114,55 +115,38 @@ contract BoostedYield is
                         UUPS AUTHORIZATION
     //////////////////////////////////////////////////////////////*/
 
-    function _authorizeUpgrade(
-        address
-    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
 
     /*//////////////////////////////////////////////////////////////
                         ADMIN FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function setYieldCollectionEnabled(
-        bool enabled
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setYieldCollectionEnabled(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
         emit YieldCollectionChanged(yieldCollectionEnabled, enabled);
         yieldCollectionEnabled = enabled;
     }
 
-    function addToken(
-        address token,
-        string calldata symbol
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function addToken(address token, string calldata symbol) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(token != address(0), InvalidAddress());
 
         nextTokenId++;
-        tokenConfigs[nextTokenId] = TokenConfig({
-            token: IERC20(token),
-            symbol: symbol,
-            enabled: true
-        });
+        tokenConfigs[nextTokenId] = TokenConfig({token: IERC20(token), symbol: symbol, enabled: true});
 
         emit TokenAdded(nextTokenId, token, symbol);
     }
 
-    function updateDuration(
-        uint256 tokenId,
-        uint256 duration,
-        bool supported,
-        bool mintEnabled
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateDuration(uint256 tokenId, uint256 duration, bool supported, bool mintEnabled)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
         require(duration > 0, InvalidDuration());
 
         DurationInfo storage d = durationInfo[tokenId][duration];
 
         // If duration wasn't previously supported, require mintEnabled to be false
         if (!d.isSupported && supported) {
-            durationInfo[tokenId][duration] = DurationInfo({
-                isSupported: true,
-                mintEnabled: mintEnabled,
-                totalLiquidity: 0,
-                feeGrowthX128: 0
-            });
+            durationInfo[tokenId][duration] =
+                DurationInfo({isSupported: true, mintEnabled: mintEnabled, totalLiquidity: 0, feeGrowthX128: 0});
         } else {
             d.isSupported = supported;
             d.mintEnabled = mintEnabled;
@@ -175,11 +159,7 @@ contract BoostedYield is
                         USER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function mint(
-        uint256 tokenId,
-        uint256 principal,
-        uint256 duration
-    ) external nonReentrant returns (uint256 nftId) {
+    function mint(uint256 tokenId, uint256 principal, uint256 duration) external nonReentrant returns (uint256 nftId) {
         TokenConfig storage tokenCfg = tokenConfigs[tokenId];
         require(tokenCfg.enabled, InvalidToken());
         require(principal > 0, InvalidAmount());
@@ -200,8 +180,7 @@ contract BoostedYield is
         d.totalLiquidity += principal;
 
         // Update maturity bucket
-        maturityBuckets[tokenId][duration][maturity]
-            .totalLiquidity += principal;
+        maturityBuckets[tokenId][duration][maturity].totalLiquidity += principal;
 
         // Create position
         positions[nftId] = Position({
@@ -225,43 +204,28 @@ contract BoostedYield is
         emit PositionMinted(nftId, msg.sender, tokenId, principal, duration);
     }
 
-    function mature(
-        uint256 tokenId,
-        uint256 duration,
-        uint256 timestamp
-    ) public {
+    function mature(uint256 tokenId, uint256 duration, uint256 timestamp) public {
         // Round timestamp to days to match mint behavior
         timestamp = timestamp - (timestamp % 1 days);
         require(timestamp <= block.timestamp, ImmaturePosition());
 
         // Iterate through supported durations
-        MaturityBucket storage bucket = maturityBuckets[tokenId][duration][
-            timestamp
-        ];
+        MaturityBucket storage bucket = maturityBuckets[tokenId][duration][timestamp];
 
         if (bucket.totalLiquidity > 0) {
             // Snapshot current fee growth for this duration
-            bucket.feeGrowthX128AtMaturity = durationInfo[tokenId][duration]
-                .feeGrowthX128;
+            bucket.feeGrowthX128AtMaturity = durationInfo[tokenId][duration].feeGrowthX128;
 
             // Remove liquidity from active tracking
-            durationInfo[tokenId][duration].totalLiquidity -= bucket
-                .totalLiquidity;
+            durationInfo[tokenId][duration].totalLiquidity -= bucket.totalLiquidity;
 
-            emit MaturityProcessed(
-                duration,
-                timestamp,
-                bucket.totalLiquidity,
-                bucket.feeGrowthX128AtMaturity
-            );
+            emit MaturityProcessed(duration, timestamp, bucket.totalLiquidity, bucket.feeGrowthX128AtMaturity);
             // Clear bucket (optional, but saves gas on future reads)
             bucket.totalLiquidity = 0;
         }
     }
 
-    function collect(
-        uint256 nftId
-    ) external nonReentrant yieldCollectionAllowed returns (uint256) {
+    function collect(uint256 nftId) external nonReentrant yieldCollectionAllowed returns (uint256) {
         _checkAuthorized(_ownerOf(nftId), msg.sender, nftId);
 
         Position storage p = positions[nftId];
@@ -280,7 +244,7 @@ contract BoostedYield is
     }
 
     function unrealizedRewards(uint256 nftId) external view returns (uint256) {
-        (uint256 feesAccrued, ) = _unrealizedRewards(positions[nftId]);
+        (uint256 feesAccrued,) = _unrealizedRewards(positions[nftId]);
         return feesAccrued;
     }
 
@@ -288,16 +252,10 @@ contract BoostedYield is
         _checkAuthorized(_ownerOf(nftId), msg.sender, nftId);
 
         Position storage p = positions[nftId];
-        require(
-            block.timestamp >= p.startTime + p.duration,
-            ImmaturePosition()
-        );
+        require(block.timestamp >= p.startTime + p.duration, ImmaturePosition());
 
         // Mature the position if it hasn't been matured yet
-        if (
-            maturityBuckets[p.tokenId][p.duration][p.maturityTime]
-                .feeGrowthX128AtMaturity == 0
-        ) {
+        if (maturityBuckets[p.tokenId][p.duration][p.maturityTime].feeGrowthX128AtMaturity == 0) {
             mature(p.tokenId, p.duration, p.maturityTime);
         }
 
@@ -318,67 +276,44 @@ contract BoostedYield is
         // Transfer funds
         tokenConfigs[p.tokenId].token.safeTransfer(msg.sender, totalAmount);
 
-        emit PositionClosed(
-            p.tokenId,
-            msg.sender,
-            totalAmount - tokensOwed,
-            p.duration
-        );
+        emit PositionClosed(p.tokenId, msg.sender, totalAmount - tokensOwed, p.duration);
         emit FeesCollected(p.tokenId, tokensOwed);
     }
 
-    function getPosition(
-        uint256 nftId
-    ) external view returns (Position memory) {
+    function getPosition(uint256 nftId) external view returns (Position memory) {
         Position storage position = positions[nftId];
         return position;
     }
 
-    function isDurationSupported(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (bool) {
+    function isDurationSupported(uint256 tokenId, uint256 duration) external view returns (bool) {
         return durationInfo[tokenId][duration].isSupported;
     }
 
-    function isMintEnabled(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (bool) {
+    function isMintEnabled(uint256 tokenId, uint256 duration) external view returns (bool) {
         return durationInfo[tokenId][duration].mintEnabled;
     }
 
-    function getDurationInfo(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (DurationInfo memory) {
+    function getDurationInfo(uint256 tokenId, uint256 duration) external view returns (DurationInfo memory) {
         return durationInfo[tokenId][duration];
     }
 
-    function getMaturityBucket(
-        uint256 tokenId,
-        uint256 duration,
-        uint256 timestamp
-    ) external view returns (MaturityBucket memory) {
+    function getMaturityBucket(uint256 tokenId, uint256 duration, uint256 timestamp)
+        external
+        view
+        returns (MaturityBucket memory)
+    {
         return maturityBuckets[tokenId][duration][timestamp];
     }
 
-    function getTokenConfig(
-        uint256 tokenId
-    ) external view returns (TokenConfig memory) {
+    function getTokenConfig(uint256 tokenId) external view returns (TokenConfig memory) {
         return tokenConfigs[tokenId];
     }
 
-    function getLastMaturedDate(
-        uint256 tokenId,
-        uint256 duration
-    ) external view returns (uint256) {
+    function getLastMaturedDate(uint256 tokenId, uint256 duration) external view returns (uint256) {
         return lastMaturedDate[tokenId][duration];
     }
 
-    function supportsInterface(
-        bytes4 interfaceId
-    )
+    function supportsInterface(bytes4 interfaceId)
         public
         view
         override(ERC721EnumerableUpgradeable, AccessControlUpgradeable)
@@ -391,11 +326,11 @@ contract BoostedYield is
                         REWARDER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function depositRewards(
-        uint256 tokenId,
-        uint256 duration,
-        uint256 amount
-    ) external nonReentrant onlyRole(REWARDER_ROLE) {
+    function depositRewards(uint256 tokenId, uint256 duration, uint256 amount)
+        external
+        nonReentrant
+        onlyRole(REWARDER_ROLE)
+    {
         TokenConfig storage tokenCfg = tokenConfigs[tokenId];
         require(tokenCfg.enabled, InvalidToken());
         require(durationInfo[tokenId][duration].isSupported, InvalidDuration());
@@ -404,8 +339,7 @@ contract BoostedYield is
         // Clean up matured buckets first
         _cleanupMaturedBuckets(tokenId, duration);
 
-        uint256 totalActiveLiquidity = durationInfo[tokenId][duration]
-            .totalLiquidity;
+        uint256 totalActiveLiquidity = durationInfo[tokenId][duration].totalLiquidity;
         // We return instead of revert to commit bucket maturity changes
         if (totalActiveLiquidity == 0) {
             return;
@@ -438,10 +372,7 @@ contract BoostedYield is
         }
     }
 
-    function _cleanupMaturedBuckets(
-        uint256 tokenId,
-        uint256 duration
-    ) internal {
+    function _cleanupMaturedBuckets(uint256 tokenId, uint256 duration) internal {
         uint256 lastMatured = lastMaturedDate[tokenId][duration];
         uint256 currentDate = block.timestamp - (block.timestamp % 1 days);
 
@@ -458,9 +389,7 @@ contract BoostedYield is
         }
 
         for (uint256 date = lastMatured; date <= currentDate; date += 1 days) {
-            MaturityBucket storage bucket = maturityBuckets[tokenId][duration][
-                date
-            ];
+            MaturityBucket storage bucket = maturityBuckets[tokenId][duration][date];
 
             if (bucket.totalLiquidity > 0) {
                 mature(tokenId, duration, date);
@@ -470,31 +399,23 @@ contract BoostedYield is
         lastMaturedDate[tokenId][duration] = currentDate;
     }
 
-    function _unrealizedRewards(
-        Position memory position
-    ) internal view returns (uint256, uint256) {
+    function _unrealizedRewards(Position memory position) internal view returns (uint256, uint256) {
         uint256 currentFeeGrowth;
 
         // If position is matured, use the snapshotted fee growth
         if (block.timestamp >= position.maturityTime) {
-            currentFeeGrowth = maturityBuckets[position.tokenId][
-                position.duration
-            ][position.maturityTime].feeGrowthX128AtMaturity;
+            currentFeeGrowth =
+            maturityBuckets[position.tokenId][position.duration][position.maturityTime].feeGrowthX128AtMaturity;
         } else {
             // Otherwise use current fee growth for the duration
-            currentFeeGrowth = durationInfo[position.tokenId][position.duration]
-                .feeGrowthX128;
+            currentFeeGrowth = durationInfo[position.tokenId][position.duration].feeGrowthX128;
         }
 
-        uint256 feeGrowthDeltaX128 = currentFeeGrowth -
-            position.feeGrowthInsideLastX128;
+        uint256 feeGrowthDeltaX128 = currentFeeGrowth - position.feeGrowthInsideLastX128;
 
         // Return the fees accrued and the current fee growth so that trackers know the
         // reference value
-        return (
-            (position.principal * feeGrowthDeltaX128) >> 128,
-            currentFeeGrowth
-        );
+        return ((position.principal * feeGrowthDeltaX128) >> 128, currentFeeGrowth);
     }
 
     function _yieldCollectionAllowed() internal view {

@@ -30,10 +30,7 @@ contract BoostedYieldTest is Test {
 
         BoostedYield impl = new BoostedYield();
 
-        bytes memory initData = abi.encodeCall(
-            BoostedYield.initialize,
-            (admin, rewarder)
-        );
+        bytes memory initData = abi.encodeCall(BoostedYield.initialize, (admin, rewarder));
 
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
 
@@ -153,10 +150,7 @@ contract BoostedYieldTest is Test {
 
         vault.mature(TOKEN_ID, DURATION, pos.maturityTime);
 
-        BoostedYield.DurationInfo memory info = vault.getDurationInfo(
-            TOKEN_ID,
-            DURATION
-        );
+        BoostedYield.DurationInfo memory info = vault.getDurationInfo(TOKEN_ID, DURATION);
 
         assertGt(info.feeGrowthX128, 0);
     }
@@ -179,10 +173,7 @@ contract BoostedYieldTest is Test {
         vm.prank(user);
         vault.withdraw(nftId);
 
-        assertEq(
-            token.balanceOf(user),
-            balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT
-        );
+        assertEq(token.balanceOf(user), balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT);
     }
 
     function test_withdraw_reverts_ifNotMatured() public {
