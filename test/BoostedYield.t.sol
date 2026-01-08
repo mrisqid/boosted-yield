@@ -27,29 +27,24 @@ contract BoostedYieldTest is Test {
     function setUp() public {
         vm.startPrank(admin);
 
-        // 1️⃣ Deploy implementation (initializer disabled)
         BoostedYield impl = new BoostedYield();
 
-        // 2️⃣ Encode initializer call
-        bytes memory initData = abi.encodeCall(BoostedYield.initialize, (admin, rewarder));
+        bytes memory initData = abi.encodeCall(
+            BoostedYield.initialize,
+            (admin, rewarder)
+        );
 
-        // 3️⃣ Deploy proxy
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
 
-        // 4️⃣ Cast proxy as BoostedYield
         vault = BoostedYield(address(proxy));
 
-        // 5️⃣ Deploy mock token
         token = new MockERC20();
 
-        // 6️⃣ Configure token + duration
         vault.addToken(address(token), "MOCK");
-
         vault.updateDuration(TOKEN_ID, DURATION, true, true);
 
         vm.stopPrank();
 
-        // Fund accounts
         token.mint(user, 10_000 ether);
         token.mint(rewarder, 10_000 ether);
 
@@ -64,16 +59,17 @@ contract BoostedYieldTest is Test {
                             INITIALIZATION
     //////////////////////////////////////////////////////////////*/
 
-    function test_initialize_setsRoles() public view {
+    function test_initialize_setsRolesAndFlags() public view {
         assertTrue(vault.hasRole(vault.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(vault.hasRole(vault.REWARDER_ROLE(), rewarder));
+        assertTrue(vault.yieldCollectionEnabled());
     }
 
     /*//////////////////////////////////////////////////////////////
                                 MINT
     //////////////////////////////////////////////////////////////*/
 
-    function test_mint_createsNFTAndStoresPosition() public {
+    function test_mint_createsPositionNFT() public {
         vm.prank(user);
         uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
 
@@ -93,8 +89,14 @@ contract BoostedYieldTest is Test {
 
     function test_mint_reverts_ifAmountZero() public {
         vm.prank(user);
-        vm.expectRevert("Invalid amount");
+        vm.expectRevert(BoostedYield.InvalidAmount.selector);
         vault.mint(TOKEN_ID, 0, DURATION);
+    }
+
+    function test_mint_reverts_ifDurationNotSupported() public {
+        vm.prank(user);
+        vm.expectRevert(BoostedYield.InvalidDuration.selector);
+        vault.mint(TOKEN_ID, STAKE_AMOUNT, 15 days);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -108,10 +110,54 @@ contract BoostedYieldTest is Test {
         vm.prank(rewarder);
         vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
 
+        uint256 unrealized = vault.unrealizedRewards(nftId);
+        assertEq(unrealized, REWARD_AMOUNT);
+
         vm.prank(user);
         uint256 collected = vault.collect(nftId);
 
         assertEq(collected, REWARD_AMOUNT);
+        assertEq(vault.unrealizedRewards(nftId), 0);
+    }
+
+    function test_collect_reverts_whenDisabled() public {
+        vm.prank(admin);
+        vault.setYieldCollectionEnabled(false);
+
+        vm.prank(user);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+
+        vm.prank(rewarder);
+        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+
+        vm.prank(user);
+        vm.expectRevert(BoostedYield.OperationNotAllowed.selector);
+        vault.collect(nftId);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                                MATURITY
+    //////////////////////////////////////////////////////////////*/
+
+    function test_maturity_bucket_snapshots_feeGrowth() public {
+        vm.prank(user);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+
+        vm.prank(rewarder);
+        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+
+        vm.warp(block.timestamp + DURATION + 1);
+
+        BoostedYield.Position memory pos = vault.getPosition(nftId);
+
+        vault.mature(TOKEN_ID, DURATION, pos.maturityTime);
+
+        BoostedYield.DurationInfo memory info = vault.getDurationInfo(
+            TOKEN_ID,
+            DURATION
+        );
+
+        assertGt(info.feeGrowthX128, 0);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -132,6 +178,18 @@ contract BoostedYieldTest is Test {
         vm.prank(user);
         vault.withdraw(nftId);
 
-        assertEq(token.balanceOf(user), balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT);
+        assertEq(
+            token.balanceOf(user),
+            balanceBefore + STAKE_AMOUNT + REWARD_AMOUNT
+        );
+    }
+
+    function test_withdraw_reverts_ifNotMatured() public {
+        vm.prank(user);
+        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+
+        vm.prank(user);
+        vm.expectRevert(BoostedYield.ImmaturePosition.selector);
+        vault.withdraw(nftId);
     }
 }
