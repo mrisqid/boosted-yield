@@ -20,17 +20,10 @@ contract DeployBoostedYield is Script {
         BoostedYield implementation = new BoostedYield();
 
         // 2. Encode initializer
-        bytes memory initData = abi.encodeWithSelector(
-            BoostedYield.initialize.selector,
-            admin,
-            rewarder
-        );
+        bytes memory initData = abi.encodeWithSelector(BoostedYield.initialize.selector, admin, rewarder);
 
         // 3. Deploy UUPS proxy
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(implementation),
-            initData
-        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
 
         vm.stopBroadcast();
 
