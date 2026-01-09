@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 /*//////////////////////////////////////////////////////////////
                         OPENZEPPELIN IMPORTS
@@ -127,7 +127,7 @@ contract BoostedYield is
     }
 
     function addToken(address token, string calldata symbol) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(token != address(0), InvalidAddress());
+        if (token == address(0)) revert InvalidAddress();
 
         nextTokenId++;
         tokenConfigs[nextTokenId] = TokenConfig({token: IERC20(token), symbol: symbol, enabled: true});
@@ -139,7 +139,7 @@ contract BoostedYield is
         external
         onlyRole(DEFAULT_ADMIN_ROLE)
     {
-        require(duration > 0, InvalidDuration());
+        if (duration == 0) revert InvalidDuration();
 
         DurationInfo storage d = durationInfo[tokenId][duration];
 
@@ -161,11 +161,11 @@ contract BoostedYield is
 
     function mint(uint256 tokenId, uint256 principal, uint256 duration) external nonReentrant returns (uint256 nftId) {
         TokenConfig storage tokenCfg = tokenConfigs[tokenId];
-        require(tokenCfg.enabled, InvalidToken());
-        require(principal > 0, InvalidAmount());
+        if (!tokenCfg.enabled) revert InvalidToken();
+        if (principal == 0) revert InvalidAmount();
 
         DurationInfo storage d = durationInfo[tokenId][duration];
-        require(d.isSupported && d.mintEnabled, InvalidDuration());
+        if (!d.isSupported || !d.mintEnabled) revert InvalidDuration();
 
         // Calculate maturity timestamp - rounded down to the nearest day
         uint256 maturity = block.timestamp + duration;
@@ -207,7 +207,7 @@ contract BoostedYield is
     function mature(uint256 tokenId, uint256 duration, uint256 timestamp) public {
         // Round timestamp to days to match mint behavior
         timestamp = timestamp - (timestamp % 1 days);
-        require(timestamp <= block.timestamp, ImmaturePosition());
+        if (timestamp > block.timestamp) revert ImmaturePosition();
 
         // Iterate through supported durations
         MaturityBucket storage bucket = maturityBuckets[tokenId][duration][timestamp];
@@ -252,7 +252,7 @@ contract BoostedYield is
         _checkAuthorized(_ownerOf(nftId), msg.sender, nftId);
 
         Position storage p = positions[nftId];
-        require(block.timestamp >= p.startTime + p.duration, ImmaturePosition());
+        if (block.timestamp < p.startTime + p.duration) revert ImmaturePosition();
 
         // Mature the position if it hasn't been matured yet
         if (maturityBuckets[p.tokenId][p.duration][p.maturityTime].feeGrowthX128AtMaturity == 0) {
@@ -332,9 +332,9 @@ contract BoostedYield is
         onlyRole(REWARDER_ROLE)
     {
         TokenConfig storage tokenCfg = tokenConfigs[tokenId];
-        require(tokenCfg.enabled, InvalidToken());
-        require(durationInfo[tokenId][duration].isSupported, InvalidDuration());
-        require(amount > 0, InvalidAmount());
+        if (!tokenCfg.enabled) revert InvalidToken();
+        if (!durationInfo[tokenId][duration].isSupported) revert InvalidDuration();
+        if (amount == 0) revert InvalidAmount();
 
         // Clean up matured buckets first
         _cleanupMaturedBuckets(tokenId, duration);
