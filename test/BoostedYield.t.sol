@@ -16,7 +16,6 @@ contract BoostedYieldTest is Test {
     address rewarder = address(0x2);
     address user = address(0x3);
 
-    uint256 constant TOKEN_ID = 1;
     uint256 constant DURATION = 30 days;
     uint256 constant STAKE_AMOUNT = 1_000 ether;
     uint256 constant REWARD_AMOUNT = 500 ether;
@@ -39,7 +38,7 @@ contract BoostedYieldTest is Test {
         token = new MockERC20();
 
         vault.addToken(address(token), "MOCK");
-        vault.updateDuration(TOKEN_ID, DURATION, true, true);
+        vault.updateDuration(address(token), DURATION, true, true);
 
         vm.stopPrank();
 
@@ -69,13 +68,13 @@ contract BoostedYieldTest is Test {
 
     function test_mint_createsPositionNFT() public {
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         assertEq(vault.ownerOf(nftId), user);
 
         BoostedYield.Position memory pos = vault.getPosition(nftId);
 
-        assertEq(pos.tokenId, TOKEN_ID);
+        assertEq(pos.token, address(token));
         assertEq(pos.principal, STAKE_AMOUNT);
         assertEq(pos.duration, DURATION);
         assertGt(pos.startTime, 0);
@@ -88,13 +87,13 @@ contract BoostedYieldTest is Test {
     function test_mint_reverts_ifAmountZero() public {
         vm.prank(user);
         vm.expectRevert(IBoostedYield.InvalidAmount.selector);
-        vault.mint(TOKEN_ID, 0, DURATION);
+        vault.mint(address(token), 0, DURATION);
     }
 
     function test_mint_reverts_ifDurationNotSupported() public {
         vm.prank(user);
         vm.expectRevert(IBoostedYield.InvalidDuration.selector);
-        vault.mint(TOKEN_ID, STAKE_AMOUNT, 15 days);
+        vault.mint(address(token), STAKE_AMOUNT, 15 days);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -103,10 +102,10 @@ contract BoostedYieldTest is Test {
 
     function test_depositRewards_and_collect() public {
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         vm.prank(rewarder);
-        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+        vault.depositRewards(address(token), DURATION, REWARD_AMOUNT);
 
         uint256 unrealized = vault.unrealizedRewards(nftId);
         assertEq(unrealized, REWARD_AMOUNT);
@@ -123,10 +122,10 @@ contract BoostedYieldTest is Test {
         vault.setYieldCollectionEnabled(false);
 
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         vm.prank(rewarder);
-        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+        vault.depositRewards(address(token), DURATION, REWARD_AMOUNT);
 
         vm.prank(user);
         vm.expectRevert(IBoostedYield.OperationNotAllowed.selector);
@@ -139,18 +138,18 @@ contract BoostedYieldTest is Test {
 
     function test_maturity_bucket_snapshots_feeGrowth() public {
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         vm.prank(rewarder);
-        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+        vault.depositRewards(address(token), DURATION, REWARD_AMOUNT);
 
         vm.warp(block.timestamp + DURATION + 1);
 
         BoostedYield.Position memory pos = vault.getPosition(nftId);
 
-        vault.mature(TOKEN_ID, DURATION, pos.maturityTime);
+        vault.mature(address(token), DURATION, pos.maturityTime);
 
-        BoostedYield.DurationInfo memory info = vault.getDurationInfo(TOKEN_ID, DURATION);
+        BoostedYield.DurationInfo memory info = vault.getDurationInfo(address(token), DURATION);
 
         assertGt(info.feeGrowthX128, 0);
     }
@@ -161,10 +160,10 @@ contract BoostedYieldTest is Test {
 
     function test_withdraw_afterMaturity() public {
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         vm.prank(rewarder);
-        vault.depositRewards(TOKEN_ID, DURATION, REWARD_AMOUNT);
+        vault.depositRewards(address(token), DURATION, REWARD_AMOUNT);
 
         vm.warp(block.timestamp + DURATION + 1);
 
@@ -178,7 +177,7 @@ contract BoostedYieldTest is Test {
 
     function test_withdraw_reverts_ifNotMatured() public {
         vm.prank(user);
-        uint256 nftId = vault.mint(TOKEN_ID, STAKE_AMOUNT, DURATION);
+        uint256 nftId = vault.mint(address(token), STAKE_AMOUNT, DURATION);
 
         vm.prank(user);
         vm.expectRevert(IBoostedYield.ImmaturePosition.selector);

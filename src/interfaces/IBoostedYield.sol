@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 interface IBoostedYield {
     /*//////////////////////////////////////////////////////////////
                                 ERRORS
@@ -20,7 +18,6 @@ interface IBoostedYield {
     //////////////////////////////////////////////////////////////*/
 
     struct TokenConfig {
-        IERC20 token;
         string symbol;
         bool enabled;
     }
@@ -33,7 +30,7 @@ interface IBoostedYield {
     }
 
     struct Position {
-        uint256 tokenId;
+        address token;
         uint256 principal;
         uint40 duration;
         uint40 startTime;
@@ -53,15 +50,15 @@ interface IBoostedYield {
 
     event YieldCollectionChanged(bool oldEnabled, bool newEnabled);
 
-    event TokenAdded(uint256 indexed tokenId, address token, string symbol);
+    event TokenAdded(address indexed token, string symbol);
 
-    event DurationUpdated(uint256 indexed tokenId, uint256 duration, bool supported, bool mintEnabled);
+    event DurationUpdated(address indexed token, uint256 duration, bool supported, bool mintEnabled);
 
     event PositionMinted(
-        uint256 indexed nftId, address indexed user, uint256 indexed tokenId, uint256 principal, uint256 duration
+        uint256 indexed nftId, address indexed user, address indexed token, uint256 principal, uint256 duration
     );
 
-    event RewardsDeposited(uint256 indexed tokenId, uint256 duration, uint256 amount);
+    event RewardsDeposited(address indexed token, uint256 duration, uint256 amount);
 
     event FeesCollected(uint256 indexed nftId, uint256 amount);
 
@@ -83,13 +80,13 @@ interface IBoostedYield {
 
     function addToken(address token, string calldata symbol) external;
 
-    function updateDuration(uint256 tokenId, uint256 duration, bool supported, bool mintEnabled) external;
+    function updateDuration(address token, uint256 duration, bool supported, bool mintEnabled) external;
 
     /*//////////////////////////////////////////////////////////////
                             USER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function mint(uint256 tokenId, uint256 principal, uint256 duration) external returns (uint256 nftId);
+    function mint(address token, uint256 principal, uint256 duration) external returns (uint256 nftId);
 
     function collect(uint256 nftId) external returns (uint256);
 
@@ -101,7 +98,7 @@ interface IBoostedYield {
                         REWARDER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function depositRewards(uint256 tokenId, uint256 duration, uint256 amount) external;
+    function depositRewards(address token, uint256 duration, uint256 amount) external;
 
     /*//////////////////////////////////////////////////////////////
                             VIEW FUNCTIONS
@@ -109,22 +106,20 @@ interface IBoostedYield {
 
     function getPosition(uint256 nftId) external view returns (Position memory);
 
-    function getDurationInfo(uint256 tokenId, uint256 duration) external view returns (DurationInfo memory);
+    function getDurationInfo(address token, uint256 duration) external view returns (DurationInfo memory);
 
-    function isDurationSupported(uint256 tokenId, uint256 duration) external view returns (bool);
+    function isDurationSupported(address token, uint256 duration) external view returns (bool);
 
-    function isMintEnabled(uint256 tokenId, uint256 duration) external view returns (bool);
+    function isMintEnabled(address token, uint256 duration) external view returns (bool);
 
-    function getMaturityBucket(uint256 tokenId, uint256 duration, uint256 timestamp)
+    function getMaturityBucket(address token, uint256 duration, uint256 timestamp)
         external
         view
         returns (MaturityBucket memory);
 
-    function getTokenConfig(uint256 tokenId) external view returns (TokenConfig memory);
+    function getTokenConfig(address token) external view returns (TokenConfig memory);
 
-    function getLastMaturedDate(uint256 tokenId, uint256 duration) external view returns (uint256);
-
-    function nextTokenId() external view returns (uint256);
+    function getLastMaturedDate(address token, uint256 duration) external view returns (uint256);
 
     function yieldCollectionEnabled() external view returns (bool);
 }
