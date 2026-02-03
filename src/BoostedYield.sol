@@ -285,9 +285,11 @@ contract BoostedYield is
     function isDurationSupported(address token, uint256 duration) external view returns (bool) {
         return durationInfo[token][duration].isSupported;
     }
+
     function isMintEnabled(address token, uint256 duration) external view returns (bool) {
         return durationInfo[token][duration].mintEnabled;
     }
+
     function getDurationInfo(address token, uint256 duration) external view returns (DurationInfo memory) {
         return durationInfo[token][duration];
     }
